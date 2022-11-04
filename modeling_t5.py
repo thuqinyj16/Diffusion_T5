@@ -810,6 +810,7 @@ class T5Stack(T5PreTrainedModel):
         self.init_weights()
         if(self.name=="encoder"):
             prompt_num=10
+            self.prompt_layer_norm = T5LayerNorm(config.d_model, eps=config.layer_norm_epsilon)
             self.prompt_embeddings = nn.Embedding(prompt_num, config.d_model)
             torch.nn.init.uniform_(self.prompt_embeddings.weight.data,-math.sqrt(1 / config.d_model),math.sqrt(1 / config.d_model))
 
@@ -838,6 +839,7 @@ class T5Stack(T5PreTrainedModel):
         self.embed_tokens = self.embed_tokens.to(self.first_device)
         # Set final layer norm to last device
         self.final_layer_norm = self.final_layer_norm.to(self.last_device)
+        self.prompt_layer_norm = self.prompt_layer_norm.to(self.last_device)
 
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
     def deparallelize(self):
@@ -849,6 +851,7 @@ class T5Stack(T5PreTrainedModel):
             self.block[i] = self.block[i].to("cpu")
         self.embed_tokens = self.embed_tokens.to("cpu")
         self.final_layer_norm = self.final_layer_norm.to("cpu")
+        self.prompt_layer_norm = self.prompt_layer_norm.to("cpu")
         torch.cuda.empty_cache()
 
     def get_input_embeddings(self):
@@ -909,12 +912,13 @@ class T5Stack(T5PreTrainedModel):
                     #print("train_prompt!!!!!!!!!!!!!!!!!!")
                     #print("prompt_ids index:",prompt_ids * (prompt_ids>=0).int())
                     #print("self.prompt_embeddings.weight:",self.prompt_embeddings.weight.data)
-                    prompt_emb = self.prompt_embeddings(prompt_ids * (prompt_ids >= 0).int()) * (prompt_ids >= 0).int().unsqueeze(2)            
+                    prompt_emb = self.prompt_embeddings(prompt_ids * (prompt_ids >= 0).int()) * (prompt_ids >= 0).int().unsqueeze(2)          
                     #print("the size of prompt_emb:",prompt_emb.size())
                     #print("prompt_emb[0][0]:",prompt_emb[0][0])
                     #print("prompt_emb[0][99]:",prompt_emb[0][99])
                     #print("prompt_emb[0][100]:",prompt_emb[0][100])
                     #print("prompt_emb[100]:",prompt_meb[100])
+                    prompt_emb = self.prompt_layer_norm(prompt_emb)
                 else:
                     #print("loaded task_prompt_recoverd!!!!!!!!!!!")
                     task_prompt_recored = torch.cat([task_prompt_recored, torch.zeros(task_prompt_recored.size()[0], prompt_ids.size()[1] - task_prompt_recored.size()[1], task_prompt_recored.size()[2]).cuda()], dim = 1)
@@ -1668,6 +1672,20 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
             loss_fct = CrossEntropyLoss(ignore_index=-100)
             loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1))
             # TODO(thom): Add z_loss https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/layers.py#L666
+
+            # prompt_ids = - (input_ids + 1)
+            # # print("train_prompt!!!!!!!!!!!!!!!!!!")
+            # # print("prompt_ids index:",prompt_ids * (prompt_ids>=0).int())
+            # # print("self.prompt_embeddings.weight:",self.encoder.prompt_embeddings.weight.data)
+            # prompt_emb = self.encoder.prompt_embeddings(prompt_ids * (prompt_ids >= 0).int()) * (prompt_ids >= 0).int().unsqueeze(2)            
+            # # print("the size of prompt_emb:",prompt_emb.size())
+            # # print("prompt_emb[0][0]:",prompt_emb[0][0])
+            # # print("prompt_emb[0][9]:",prompt_emb[0][9])
+            # # print("prompt_emb[0][10]:",prompt_emb[0][10])
+            # prompt_emb = prompt_emb[:, :10, :]
+            # loss_func_mse = nn.MSELoss()
+            # mse_loss = loss_func_mse(prompt_emb, torch.zeros(prompt_emb.size()).cuda())
+            # loss = loss + mse_loss
 
         if not return_dict:
             output = (lm_logits,) + decoder_outputs[1:] + encoder_outputs

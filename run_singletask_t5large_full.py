@@ -188,6 +188,7 @@ def train(args, logger, model, train_data, dev_data, optimizer, scheduler):
         
     logger.info("starting from global step: %d" % (global_step))
     logger.info("Starting training!")
+    best_model_state_dict = None
     for epoch in range(int(args.num_train_epochs)):
         # for batch in tqdm(train_data.dataloader, desc="Epoch {}".format(epoch), disable=args.quiet):
         for batch in train_data.dataloader:
